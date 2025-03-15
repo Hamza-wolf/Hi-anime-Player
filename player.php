@@ -1,27 +1,61 @@
 <?php
-
-$debug = false; // Set this to false for normal use, true to debug API response if having issue's with the player
-
-$myapi_url = ""; // Add your own deployed API URL (e.g., https://your-api.vercel.app) or with anyother API URL if you are using.
+$myapi_url = "https://anoboyapi.vercel.app"; // Your API URL
 $id = $_GET['id'] ?? '';
 $ep = $_GET['ep'] ?? '';
-$server = $_GET['server'] ?? 'hd-1';
-$type = $_GET['type'] ?? 'sub'; // sub or dub or raw by default it will be sub.
+$server = $_GET['server'] ?? 'hd-1'; // Default server: hd-1
+$type = $_GET['type'] ?? 'sub'; // Default type: sub
 
-$api_url = "$myapi_url/api/v2/hianime/episode/sources?animeEpisodeId=$id&ep=$ep&server=$server&category=$type"; // Use your API's endpoint if your using another type of api or something else but if you are using the same api as mine then you can use this.
-$json = file_get_contents($api_url);
+// Function to fetch video URL
+function fetchVideoUrl($myapi_url, $id, $ep, $server, $type) {
+    $api_url = "$myapi_url/api/v2/hianime/episode/sources?animeEpisodeId=$id&ep=$ep&server=$server&category=$type";
+    $json = file_get_contents($api_url);
 
-if (!$json) {
-    die("Error: Could not fetch API data");
+    if (!$json) {
+        return null;
+    }
+
+    $episode = json_decode($json, true);
+
+    if (!isset($episode['data']['sources'][0]['url'])) {
+        return null;
+    }
+
+    return $episode;
 }
 
-$episode = json_decode($json, true);
+// Function to fetch available servers
+function fetchAvailableServers($myapi_url, $id, $ep) {
+    $servers_url = "$myapi_url/api/v2/hianime/episode/servers?animeEpisodeId=$id&ep=$ep";
+    $servers_json = file_get_contents($servers_url);
 
-if ($debug) {
-    echo "<pre>";
-    print_r($episode);
-    echo "</pre>";
-    exit;
+    if (!$servers_json) {
+        return null;
+    }
+
+    return json_decode($servers_json, true);
+}
+
+// If type is 'raw', check if 'sub' is available
+if ($type === 'raw') {
+    $servers = fetchAvailableServers($myapi_url, $id, $ep);
+
+    if (!$servers) {
+        die("Error: Could not fetch servers data");
+    }
+
+    // Check if 'sub' is available
+    if (!empty($servers['data']['sub'])) {
+        // If 'sub' is available, use 'sub'
+        $type = 'sub';
+    }
+    // If 'sub' is not available, keep 'raw'
+}
+
+// Fetch video URL for the selected type
+$episode = fetchVideoUrl($myapi_url, $id, $ep, $server, $type);
+
+if (!$episode) {
+    die("Failed to Get the Video. Please come Back Later Or Refresh The Page");
 }
 
 if (!isset($episode['data']['sources'][0]['url'])) {
@@ -64,7 +98,7 @@ $chaptersVtt = 'data:text/vtt;base64,' . base64_encode($vttContent);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Anime Player</title>
+    <title>Anoboy VidStack Player</title>
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
     <style>
@@ -102,6 +136,17 @@ $chaptersVtt = 'data:text/vtt;base64,' . base64_encode($vttContent);
         .skip-btn:hover {
             background: rgba(0, 0, 0, 0.9);
         }
+        /* Competitor's subtitle styling */
+        .vds-captions {
+            --cue-bg-color: rgba(0, 0, 0, 0);
+            --cue-default-font-size: var(--media-cue-font-size, calc(var(--overlay-height) / 100 * 6));
+        }
+        .vds-captions [data-part=cue] {
+            backdrop-filter: blur(0px);
+            text-shadow: rgb(0, 0, 0) -2px 0px 1px, rgb(0, 0, 0) 2px 0px 1px, rgb(0, 0, 0) 0px -2px 1px, rgb(0, 0, 0) 0px 2px 1px, rgb(0, 0, 0) -1px 1px 1px, rgb(0, 0, 0) 1px 1px 1px, rgb(0, 0, 0) 1px -1px 1px, rgb(0, 0, 0) 1px 1px 1px;
+            font-weight: 700;
+            font-family: TrebuchetMS, Helvetica, sans-serif;
+        }
     </style>
 </head>
 <body>
@@ -117,7 +162,7 @@ $chaptersVtt = 'data:text/vtt;base64,' . base64_encode($vttContent);
         // Player configuration
         const player = await VidstackPlayer.create({
             target: '#target',
-            title: 'Anime Player',
+            title: 'Anoboy Player',
             src: '<?= htmlspecialchars($video, ENT_QUOTES, 'UTF-8') ?>',
             poster: '',
             layout: new VidstackPlayerLayout({
@@ -140,6 +185,20 @@ $chaptersVtt = 'data:text/vtt;base64,' . base64_encode($vttContent);
                     default: true,
                 }
             ],
+        });
+
+        // Resume functionality
+        const storageKey = `player-progress-<?= $id ?>-<?= $ep ?>`;
+        const savedTime = localStorage.getItem(storageKey);
+
+        if (savedTime) {
+            player.addEventListener('loadedmetadata', () => {
+                player.currentTime = parseFloat(savedTime);
+            });
+        }
+
+        player.addEventListener('timeupdate', () => {
+            localStorage.setItem(storageKey, player.currentTime);
         });
 
         // Skip functionality
